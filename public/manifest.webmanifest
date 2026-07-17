@@ -1,0 +1,20 @@
+{
+  "name": "ForteStack",
+  "short_name": "ForteStack",
+  "description": "Mobile-first construction drawing and measurement workspace.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f8f8f6",
+  "theme_color": "#07111f",
+  "icons": [
+    {
+      "src": "./fortestack-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
