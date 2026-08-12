@@ -35,14 +35,14 @@ export async function getDrawingAnnotations(drawingId: string) {
 }
 
 export async function saveAnnotation(annotation: Annotation) {
-  await db.putAnnotation({
+  await db.putAnnotationAndTouchParents({
     ...annotation,
     updatedAt: now(),
   });
 }
 
 export async function deleteAnnotation(annotationId: string) {
-  await db.deleteAnnotation(annotationId);
+  await db.deleteAnnotationAndCleanup(annotationId);
 }
 
 export function createDimensionAnnotation(input: {

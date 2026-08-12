@@ -291,7 +291,13 @@ export function DrawingWorkspace({
   const activeLayerId=currentDrawing.activeLayerId??layers[0].id;
   const visibleLayerIds=new Set(layers.filter(layer=>layer.visible).map(layer=>layer.id));
   const layerOrder=new Map(layers.map(layer=>[layer.id,layer.order]));
-  const visibleAnnotations=annotations.filter(annotation=>visibleLayerIds.has(annotation.layerId)||!layerOrder.has(annotation.layerId)).sort((a,b)=>((layerOrder.get(a.layerId)??0)-(layerOrder.get(b.layerId)??0))||(Number(a.type!=="image")-Number(b.type!=="image")));
+  const renderPriority:Record<Annotation["type"],number>={image:0,room:10,rectangle:20,circle:20,door:30,line:40,dimension:50,note:60};
+  // The same ordered collection feeds both the live SVG and export capture.
+  // Layers remain authoritative; priorities only establish sensible stacking
+  // for objects that share a layer.
+  const visibleAnnotations=annotations
+    .filter(annotation=>visibleLayerIds.has(annotation.layerId)||!layerOrder.has(annotation.layerId))
+    .sort((a,b)=>((layerOrder.get(a.layerId)??0)-(layerOrder.get(b.layerId)??0))||(renderPriority[a.type]-renderPriority[b.type]));
 
   function pushDebugEvent(message: string) {
     const timestamp = new Date().toLocaleTimeString();

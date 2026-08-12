@@ -2,11 +2,59 @@ import type { Project } from "../features/projects/projectTypes";
 import type { Annotation, ReferencePoint, StoredAnnotation } from "../features/annotations/annotationTypes";
 import type { Asset } from "../features/assets/assetTypes";
 import type { Drawing } from "../features/drawings/drawingTypes";
+import type { SiteNote, SiteNoteContent, SiteNoteSection } from "../features/siteNotes/siteNoteTypes";
 
 const databaseName = "fortestack";
-const databaseVersion = 3;
+const databaseVersion = 5;
 
-type StoreName = "projects" | "drawings" | "assets" | "annotations" | "referencePoints";
+export type StoreName = "projects" | "drawings" | "assets" | "annotations" | "referencePoints" | "siteNotes" | "siteNoteSections" | "siteNoteContents";
+export type StoreRecordMap = {
+  projects: Project; drawings: Drawing; assets: Asset; annotations: StoredAnnotation;
+  referencePoints: ReferencePoint; siteNotes: SiteNote; siteNoteSections: SiteNoteSection; siteNoteContents: SiteNoteContent;
+};
+export type StoreMap = { [Name in StoreName]: IDBObjectStore };
+
+type Migration = (database: IDBDatabase, transaction: IDBTransaction) => void;
+
+const migrations: Record<number, Migration> = {
+  1(database) {
+    const projects = database.createObjectStore("projects", { keyPath: "id" });
+    projects.createIndex("updatedAt", "updatedAt");
+    const drawings = database.createObjectStore("drawings", { keyPath: "id" });
+    drawings.createIndex("projectId", "projectId");
+    drawings.createIndex("updatedAt", "updatedAt");
+  },
+  2(database) {
+    const assets = database.createObjectStore("assets", { keyPath: "id" });
+    assets.createIndex("projectId", "projectId");
+  },
+  3(database) {
+    const annotations = database.createObjectStore("annotations", { keyPath: "id" });
+    annotations.createIndex("drawingId", "drawingId");
+    const referencePoints = database.createObjectStore("referencePoints", { keyPath: "id" });
+    referencePoints.createIndex("drawingId", "drawingId");
+  },
+  4(_database, transaction) {
+    // Version 4 establishes explicit, sequential migrations. The existing schema
+    // already has the required indexes, so no stored records need rewriting.
+    for (const storeName of ["projects", "drawings", "assets", "annotations", "referencePoints"] as const) {
+      if (!transaction.objectStoreNames.contains(storeName)) {
+        throw new Error(`ForteStack migration 4 expected the ${storeName} store.`);
+      }
+    }
+  },
+  5(database) {
+    const notes = database.createObjectStore("siteNotes", { keyPath: "id" });
+    notes.createIndex("projectId", "projectId");
+    notes.createIndex("updatedAt", "updatedAt");
+    const sections = database.createObjectStore("siteNoteSections", { keyPath: "id" });
+    sections.createIndex("siteNoteId", "siteNoteId");
+    sections.createIndex("siteNoteId_order", ["siteNoteId", "order"]);
+    const contents = database.createObjectStore("siteNoteContents", { keyPath: "id" });
+    contents.createIndex("sectionId", "sectionId");
+    contents.createIndex("sectionId_order", ["sectionId", "order"]);
+  },
+};
 
 let databasePromise: Promise<IDBDatabase> | undefined;
 
@@ -23,33 +71,16 @@ function openDatabase(): Promise<IDBDatabase> {
 
     const request = globalThis.indexedDB.open(databaseName, databaseVersion);
 
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const database = request.result;
-
-      if (!database.objectStoreNames.contains("projects")) {
-        const store = database.createObjectStore("projects", { keyPath: "id" });
-        store.createIndex("updatedAt", "updatedAt");
-      }
-
-      if (!database.objectStoreNames.contains("drawings")) {
-        const store = database.createObjectStore("drawings", { keyPath: "id" });
-        store.createIndex("projectId", "projectId");
-        store.createIndex("updatedAt", "updatedAt");
-      }
-
-      if (!database.objectStoreNames.contains("assets")) {
-        const store = database.createObjectStore("assets", { keyPath: "id" });
-        store.createIndex("projectId", "projectId");
-      }
-
-      if (!database.objectStoreNames.contains("annotations")) {
-        const store = database.createObjectStore("annotations", { keyPath: "id" });
-        store.createIndex("drawingId", "drawingId");
-      }
-
-      if (!database.objectStoreNames.contains("referencePoints")) {
-        const store = database.createObjectStore("referencePoints", { keyPath: "id" });
-        store.createIndex("drawingId", "drawingId");
+      const transaction = request.transaction;
+      if (!transaction) throw new Error("ForteStack migration transaction is unavailable.");
+      const oldVersion = event.oldVersion;
+      for (let version = oldVersion + 1; version <= databaseVersion; version += 1) {
+        const migrate = migrations[version];
+        if (!migrate) throw new Error(`Missing ForteStack database migration ${version}.`);
+        console.info(`[ForteStack] applying database migration ${version}`);
+        migrate(database, transaction);
       }
     };
 
@@ -77,6 +108,42 @@ function openDatabase(): Promise<IDBDatabase> {
   });
 
   return databasePromise;
+}
+
+export function requestResult<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed."));
+  });
+}
+
+export async function runMultiStoreTransaction<Names extends readonly StoreName[], T>(
+  storeNames: Names,
+  mode: IDBTransactionMode,
+  action: (stores: Pick<StoreMap, Names[number]>, transaction: IDBTransaction) => Promise<T> | T,
+): Promise<T> {
+  const database = await openDatabase();
+  const transaction = database.transaction([...storeNames], mode);
+  const stores = Object.fromEntries(storeNames.map((name) => [name, transaction.objectStore(name)])) as Pick<StoreMap, Names[number]>;
+  const completion = new Promise<void>((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed."));
+    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted."));
+  });
+
+  try {
+    const result = await action(stores, transaction);
+    await completion;
+    return result;
+  } catch (error) {
+    try {
+      transaction.abort();
+    } catch {
+      // The transaction may already have completed or aborted.
+    }
+    await completion.catch(() => undefined);
+    throw error;
+  }
 }
 
 function runTransaction<T>(
@@ -168,12 +235,58 @@ export const db = {
     await runTransaction("drawings", "readwrite", (store) => store.put(drawing));
   },
 
+  async putDrawingAndTouchProject(drawing: Drawing): Promise<void> {
+    await runMultiStoreTransaction(["drawings", "projects"] as const, "readwrite", async (stores) => {
+      stores.drawings.put(drawing);
+      const project = await requestResult<Project | undefined>(stores.projects.get(drawing.projectId));
+      if (project) stores.projects.put({ ...project, updatedAt: drawing.updatedAt });
+    });
+  },
+
   async deleteDrawing(drawingId: string): Promise<void> {
     await runTransaction("drawings", "readwrite", (store) => store.delete(drawingId));
   },
 
+  async deleteDrawingGraph(drawing: Drawing): Promise<void> {
+    await runMultiStoreTransaction(
+      ["projects", "drawings", "annotations", "referencePoints", "assets", "siteNoteContents"] as const,
+      "readwrite",
+      async (stores) => {
+        const annotations = await requestResult<StoredAnnotation[]>(stores.annotations.index("drawingId").getAll(drawing.id));
+        const referencePoints = await requestResult<ReferencePoint[]>(stores.referencePoints.index("drawingId").getAll(drawing.id));
+        const candidateAssetIds = new Set<string>();
+        if (drawing.backgroundAssetId) candidateAssetIds.add(drawing.backgroundAssetId);
+        for (const annotation of annotations) {
+          if (annotation.type === "image") candidateAssetIds.add(annotation.assetId);
+          stores.annotations.delete(annotation.id);
+        }
+        for (const referencePoint of referencePoints) stores.referencePoints.delete(referencePoint.id);
+        stores.drawings.delete(drawing.id);
+
+        const remainingDrawings = await requestResult<Drawing[]>(stores.drawings.index("projectId").getAll(drawing.projectId));
+        const remainingAnnotations = await requestResult<StoredAnnotation[]>(stores.annotations.getAll());
+        const siteNoteContents = await requestResult<SiteNoteContent[]>(stores.siteNoteContents.getAll());
+        for (const assetId of candidateAssetIds) {
+          const usedByDrawing = remainingDrawings.some((item) => item.id !== drawing.id && item.backgroundAssetId === assetId);
+          const usedByAnnotation = remainingAnnotations.some((item) => item.type === "image" && item.assetId === assetId && item.drawingId !== drawing.id);
+          const usedBySiteNote = siteNoteContents.some((item) => item.type === "photo" && item.assetId === assetId);
+          if (!usedByDrawing && !usedByAnnotation && !usedBySiteNote) stores.assets.delete(assetId);
+        }
+
+        const project = await requestResult<Project | undefined>(stores.projects.get(drawing.projectId));
+        if (project) stores.projects.put({ ...project, updatedAt: new Date().toISOString() });
+      },
+    );
+  },
+
   async getAsset(assetId: string): Promise<Asset | undefined> {
     return runTransaction<Asset>("assets", "readonly", (store) => store.get(assetId));
+  },
+
+  async getAssetsByProject(projectId: string): Promise<Asset[]> {
+    return (await runTransaction<Asset[]>("assets", "readonly", (store) =>
+      store.index("projectId").getAll(projectId),
+    )) ?? [];
   },
 
   async putAsset(asset: Asset): Promise<void> {
@@ -182,6 +295,33 @@ export const db = {
 
   async deleteAsset(assetId: string): Promise<void> {
     await runTransaction("assets", "readwrite", (store) => store.delete(assetId));
+  },
+
+  async getAssetReferences(assetId: string, projectId: string): Promise<{ drawingIds: string[]; annotationIds: string[]; siteNoteContentIds: string[] }> {
+    return runMultiStoreTransaction(["drawings", "annotations", "siteNoteContents"] as const, "readonly", async (stores) => {
+      const drawings = await requestResult<Drawing[]>(stores.drawings.index("projectId").getAll(projectId));
+      const annotations = await requestResult<StoredAnnotation[]>(stores.annotations.getAll());
+      const contents = await requestResult<SiteNoteContent[]>(stores.siteNoteContents.getAll());
+      return {
+        drawingIds: drawings.filter((drawing) => drawing.backgroundAssetId === assetId).map((drawing) => drawing.id),
+        annotationIds: annotations.filter((item) => item.type === "image" && item.assetId === assetId).map((item) => item.id),
+        siteNoteContentIds: contents.filter((item) => item.type === "photo" && item.assetId === assetId).map((item) => item.id),
+      };
+    });
+  },
+
+  async deleteAssetIfUnreferenced(asset: Asset): Promise<boolean> {
+    return runMultiStoreTransaction(["assets", "drawings", "annotations", "siteNoteContents"] as const, "readwrite", async (stores) => {
+      const drawings = await requestResult<Drawing[]>(stores.drawings.index("projectId").getAll(asset.projectId));
+      const annotations = await requestResult<StoredAnnotation[]>(stores.annotations.getAll());
+      const contents = await requestResult<SiteNoteContent[]>(stores.siteNoteContents.getAll());
+      const isReferenced = drawings.some((drawing) => drawing.backgroundAssetId === asset.id)
+        || annotations.some((item) => item.type === "image" && item.assetId === asset.id)
+        || contents.some((item) => item.type === "photo" && item.assetId === asset.id);
+      if (isReferenced) return false;
+      stores.assets.delete(asset.id);
+      return true;
+    });
   },
 
   async getAnnotationsByDrawing(drawingId: string): Promise<StoredAnnotation[]> {
@@ -196,8 +336,48 @@ export const db = {
     await runTransaction("annotations", "readwrite", (store) => store.put(annotation));
   },
 
+  async putAnnotationAndTouchParents(annotation: Annotation): Promise<void> {
+    await runMultiStoreTransaction(["annotations", "drawings", "projects"] as const, "readwrite", async (stores) => {
+      stores.annotations.put(annotation);
+      const drawing = await requestResult<Drawing | undefined>(stores.drawings.get(annotation.drawingId));
+      if (!drawing) return;
+      const updatedDrawing = { ...drawing, updatedAt: annotation.updatedAt };
+      stores.drawings.put(updatedDrawing);
+      const project = await requestResult<Project | undefined>(stores.projects.get(drawing.projectId));
+      if (project) stores.projects.put({ ...project, updatedAt: annotation.updatedAt });
+    });
+  },
+
   async deleteAnnotation(annotationId: string): Promise<void> {
     await runTransaction("annotations", "readwrite", (store) => store.delete(annotationId));
+  },
+
+  async deleteAnnotationAndCleanup(annotationId: string): Promise<void> {
+    await runMultiStoreTransaction(
+      ["annotations", "drawings", "projects", "assets", "siteNoteContents"] as const,
+      "readwrite",
+      async (stores) => {
+        const annotation = await requestResult<StoredAnnotation | undefined>(stores.annotations.get(annotationId));
+        if (!annotation) return;
+        stores.annotations.delete(annotationId);
+        const timestamp = new Date().toISOString();
+        const drawing = await requestResult<Drawing | undefined>(stores.drawings.get(annotation.drawingId));
+        if (drawing) {
+          stores.drawings.put({ ...drawing, updatedAt: timestamp });
+          const project = await requestResult<Project | undefined>(stores.projects.get(drawing.projectId));
+          if (project) stores.projects.put({ ...project, updatedAt: timestamp });
+        }
+        if (annotation.type === "image") {
+          const remaining = await requestResult<StoredAnnotation[]>(stores.annotations.getAll());
+          const drawings = await requestResult<Drawing[]>(stores.drawings.getAll());
+          const siteNoteContents = await requestResult<SiteNoteContent[]>(stores.siteNoteContents.getAll());
+          const stillReferenced = remaining.some((item) => item.id !== annotationId && item.type === "image" && item.assetId === annotation.assetId)
+            || drawings.some((item) => item.backgroundAssetId === annotation.assetId)
+            || siteNoteContents.some((item) => item.type === "photo" && item.assetId === annotation.assetId);
+          if (!stillReferenced) stores.assets.delete(annotation.assetId);
+        }
+      },
+    );
   },
 
   async getReferencePointsByDrawing(drawingId: string): Promise<ReferencePoint[]> {

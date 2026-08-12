@@ -1,4 +1,4 @@
-import { FolderKanban, Plus, Search } from "lucide-react";
+import { ArrowLeft, FolderKanban, Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { AppHeader } from "../../components/AppHeader";
 import { AppVersionStamp } from "../../components/AppVersionStamp";
@@ -11,12 +11,13 @@ import { ProjectFormSheet } from "./ProjectFormSheet";
 
 type ProjectListScreenProps = {
   projects: Project[];
+  onBack: () => void;
   onProjectsChanged: () => Promise<void>;
   onOpenProject: (projectId: string) => void;
 };
 
 export function ProjectListScreen({
-  projects,
+  projects, onBack,
   onProjectsChanged,
   onOpenProject,
 }: ProjectListScreenProps) {
@@ -42,6 +43,7 @@ export function ProjectListScreen({
 
   return (
     <main className="app-shell">
+      <div className="dashboard-header project-list-back"><IconButton icon={<ArrowLeft size={22}/>} label="Back to Home" onClick={onBack}/></div>
       <AppHeader
         title="Projects"
         eyebrow="ForteStack"

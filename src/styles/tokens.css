@@ -1,14 +1,20 @@
 :root {
   color-scheme: light;
   --color-ink: #142033;
+  --color-text-primary: var(--color-ink);
   --color-muted: #66758a;
+  --color-text-secondary: var(--color-muted);
   --color-faint: #8e9aad;
   --color-line: #dce3ed;
+  --color-border: var(--color-line);
   --color-panel: #ffffff;
+  --color-surface: var(--color-panel);
   --color-panel-soft: #f5f7fa;
   --color-background: #eef3f8;
   --color-primary: #1677ff;
   --color-primary-strong: #075ed3;
+  --color-primary-soft: #eaf2ff;
+  --color-accent: var(--color-primary);
   --color-success: #1a936f;
   --color-warning: #a56a00;
   --color-shadow: rgba(21, 32, 51, 0.14);

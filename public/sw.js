@@ -1,4 +1,4 @@
-const CACHE = "fortestack-shell-v1";
+const CACHE = "fortestack-shell-v3";
 const SHELL = ["./", "./manifest.webmanifest", "./fortestack-icon.svg"];
 
 self.addEventListener("install", event => {

@@ -39,13 +39,13 @@ export async function createDrawing(projectId: string, input: DrawingInput): Pro
     updatedAt: timestamp,
   };
 
-  await db.putDrawing(drawing);
+  await db.putDrawingAndTouchProject(drawing);
   return drawing;
 }
 
 export async function updateDrawingLayers(drawing: Drawing, layers: DrawingLayer[], activeLayerId: string): Promise<Drawing> {
   const updated={...drawing,layers,activeLayerId,updatedAt:now()};
-  await db.putDrawing(updated);
+  await db.putDrawingAndTouchProject(updated);
   return updated;
 }
 
@@ -59,7 +59,7 @@ export async function updateDrawingSnapSettings(
     updatedAt: now(),
   };
 
-  await db.putDrawing(updated);
+  await db.putDrawingAndTouchProject(updated);
   return updated;
 }
 
@@ -73,7 +73,7 @@ export async function updateDrawingScale(
     updatedAt: now(),
   };
 
-  await db.putDrawing(updated);
+  await db.putDrawingAndTouchProject(updated);
   return updated;
 }
 
@@ -84,7 +84,7 @@ export async function clearDrawingScale(drawing: Drawing): Promise<Drawing> {
     updatedAt: now(),
   };
 
-  await db.putDrawing(updated);
+  await db.putDrawingAndTouchProject(updated);
   return updated;
 }
 
@@ -95,22 +95,12 @@ export async function renameDrawing(drawing: Drawing, name: string): Promise<Dra
     updatedAt: now(),
   };
 
-  await db.putDrawing(updated);
+  await db.putDrawingAndTouchProject(updated);
   return updated;
 }
 
 export async function deleteDrawing(drawing: Drawing): Promise<void> {
-  const annotations = await db.getAnnotationsByDrawing(drawing.id);
-  const referencePoints = await db.getReferencePointsByDrawing(drawing.id);
-
-  await Promise.all(annotations.map((annotation) => db.deleteAnnotation(annotation.id)));
-  await Promise.all(referencePoints.map((referencePoint) => db.deleteReferencePoint(referencePoint.id)));
-
-  if (drawing.backgroundAssetId) {
-    await db.deleteAsset(drawing.backgroundAssetId);
-  }
-
-  await db.deleteDrawing(drawing.id);
+  await db.deleteDrawingGraph(drawing);
 }
 
 export function getDefaultSnapSettings(): SnapSettings {

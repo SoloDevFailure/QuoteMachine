@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   ChevronRight,
   Layers3,
+  ClipboardPenLine,
   MoreHorizontal,
   Pencil,
 } from "lucide-react";
@@ -13,11 +14,13 @@ import { getProjectDrawings } from "../drawings/drawingStore";
 import { updateProject } from "./projectStore";
 import type { Project, ProjectInput } from "./projectTypes";
 import { ProjectFormSheet } from "./ProjectFormSheet";
+import { getSiteNotesByProject } from "../siteNotes/siteNoteStore";
 
 type ProjectDashboardScreenProps = {
   project: Project;
   onBack: () => void;
   onOpenDrawings: () => void;
+  onOpenSiteNotes: () => void;
   onProjectChanged: () => Promise<void>;
 };
 
@@ -25,13 +28,16 @@ export function ProjectDashboardScreen({
   project,
   onBack,
   onOpenDrawings,
+  onOpenSiteNotes,
   onProjectChanged,
 }: ProjectDashboardScreenProps) {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [drawingCount, setDrawingCount] = useState(0);
+  const [siteNoteCount, setSiteNoteCount] = useState(0);
 
   useEffect(() => {
     getProjectDrawings(project.id).then((drawings) => setDrawingCount(drawings.length));
+    getSiteNotesByProject(project.id).then((notes) => setSiteNoteCount(notes.length));
   }, [project.id]);
 
   async function handleUpdateProject(input: ProjectInput) {
@@ -84,6 +90,11 @@ export function ProjectDashboardScreen({
             </small>
           </span>
           <ChevronRight size={18} />
+        </button>
+        <button className="dashboard-tile" type="button" onClick={onOpenSiteNotes}>
+          <span className="dashboard-tile__icon"><ClipboardPenLine size={22}/></span>
+          <span><strong>Site Notes</strong><small>{siteNoteCount ? `${siteNoteCount} field note${siteNoteCount === 1 ? "" : "s"}` : "Start recording this job"}</small></span>
+          <ChevronRight size={18}/>
         </button>
       </section>
 
