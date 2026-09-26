@@ -3,7 +3,7 @@ import { buildInfo } from "../app/buildInfo";
 export function AppVersionStamp() {
   return (
     <footer className="app-version-stamp" aria-label="App build version">
-      ForteStack v{buildInfo.version} · {formatBuildTime(buildInfo.buildTime)}
+      PILLAR BUILDWORKS v{buildInfo.version} · {formatBuildTime(buildInfo.buildTime)}
     </footer>
   );
 }

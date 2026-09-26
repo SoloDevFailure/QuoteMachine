@@ -14,7 +14,7 @@ export function PlaceholderScreen({ tab, onNavigate }: { tab: RootTab; onNavigat
   const content = copy[tab as keyof typeof copy];
   if (!content) return null;
   const Icon = content.icon;
-  return <ResponsivePage withNavigation className="placeholder-screen"><section className="placeholder-panel"><Icon size={34}/><p className="app-header__eyebrow">ForteStack</p><h1>{content.title}</h1><p>{content.body}</p><span>Coming in a future phase</span></section><BottomNavigation active={tab} onNavigate={onNavigate}/></ResponsivePage>;
+  return <ResponsivePage withNavigation className="placeholder-screen"><section className="placeholder-panel"><Icon size={34}/><p className="app-header__eyebrow">PILLAR BUILDWORKS</p><h1>{content.title}</h1><p>{content.body}</p><span>Coming in a future phase</span></section><BottomNavigation active={tab} onNavigate={onNavigate}/></ResponsivePage>;
 }
 
 export function SiteNotesPlaceholder({ onBack }: { onBack: () => void }) {

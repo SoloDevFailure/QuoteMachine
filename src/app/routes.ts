@@ -1,4 +1,4 @@
-export type RootTab = "home" | "business" | "profile" | "settings";
+export type RootTab = "home" | "projects" | "business" | "profile" | "settings";
 
 export type Route =
   | { name: "home" }

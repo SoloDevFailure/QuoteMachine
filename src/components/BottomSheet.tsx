@@ -20,6 +20,8 @@ export function BottomSheet({
   onDismiss,
 }: BottomSheetProps) {
   const sheetRef = useRef<HTMLElement>(null);
+  const dismissRef = useRef(onDismiss);
+  dismissRef.current = onDismiss;
   const openerRef = useRef<HTMLElement | null>(null);
   useKeyboardAwareViewport(isOpen, sheetRef);
 
@@ -28,9 +30,12 @@ export function BottomSheet({
     openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const sheet = sheetRef.current;
     const focusable = () => [...(sheet?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])];
-    const frame = requestAnimationFrame(() => focusable()[0]?.focus());
+    const frame = requestAnimationFrame(() => {
+      const input = sheet?.querySelector<HTMLElement>('input:not([type="hidden"]):not([type="file"]), textarea');
+      (input ?? focusable()[0])?.focus();
+    });
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") { event.preventDefault(); onDismiss(); return; }
+      if (event.key === "Escape") { event.preventDefault(); dismissRef.current(); return; }
       if (event.key !== "Tab") return;
       const items = focusable();
       if (!items.length) return;
@@ -40,7 +45,7 @@ export function BottomSheet({
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => { cancelAnimationFrame(frame); document.removeEventListener("keydown", handleKeyDown); openerRef.current?.focus(); };
-  }, [isOpen, onDismiss]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

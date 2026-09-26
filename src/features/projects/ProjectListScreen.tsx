@@ -1,111 +1,12 @@
-import { ArrowLeft, FolderKanban, Plus, Search } from "lucide-react";
-import { useMemo, useState } from "react";
-import { AppHeader } from "../../components/AppHeader";
-import { AppVersionStamp } from "../../components/AppVersionStamp";
-import { EmptyState } from "../../components/EmptyState";
-import { IconButton } from "../../components/IconButton";
-import { StatusPill } from "../../components/StatusPill";
-import { createProject } from "./projectStore";
-import type { Project, ProjectInput } from "./projectTypes";
-import { ProjectFormSheet } from "./ProjectFormSheet";
-
-type ProjectListScreenProps = {
-  projects: Project[];
-  onBack: () => void;
-  onProjectsChanged: () => Promise<void>;
-  onOpenProject: (projectId: string) => void;
-};
-
-export function ProjectListScreen({
-  projects, onBack,
-  onProjectsChanged,
-  onOpenProject,
-}: ProjectListScreenProps) {
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [query, setQuery] = useState("");
-
-  const filteredProjects = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return projects;
-
-    return projects.filter((project) =>
-      [project.name, project.clientName, project.siteAddress]
-        .filter(Boolean)
-        .some((value) => value!.toLowerCase().includes(normalizedQuery)),
-    );
-  }, [projects, query]);
-
-  async function handleCreateProject(input: ProjectInput) {
-    const project = await createProject(input);
-    await onProjectsChanged();
-    onOpenProject(project.id);
-  }
-
-  return (
-    <main className="app-shell">
-      <div className="dashboard-header project-list-back"><IconButton icon={<ArrowLeft size={22}/>} label="Back to Home" onClick={onBack}/></div>
-      <AppHeader
-        title="Projects"
-        eyebrow="ForteStack"
-        action={
-          <IconButton
-            icon={<Plus size={24} />}
-            label="Create project"
-            variant="primary"
-            onClick={() => setIsCreateOpen(true)}
-          />
-        }
-      />
-
-      <section className="search-field">
-        <Search size={18} />
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search projects"
-          aria-label="Search projects"
-        />
-      </section>
-
-      {projects.length === 0 ? (
-        <EmptyState
-          title="Start with a project"
-          body="Create the job workspace first. Drawings, photos and measurements will live inside it."
-          action={
-            <button className="primary-button" type="button" onClick={() => setIsCreateOpen(true)}>
-              New project
-            </button>
-          }
-        />
-      ) : (
-        <section className="project-list" aria-label="Projects">
-          {filteredProjects.map((project) => (
-            <button
-              className="project-card"
-              key={project.id}
-              type="button"
-              onClick={() => onOpenProject(project.id)}
-            >
-              <span className="project-card__icon">
-                <FolderKanban size={22} />
-              </span>
-              <span className="project-card__body">
-                <strong>{project.name}</strong>
-                <span>{project.clientName || project.siteAddress || "Project workspace"}</span>
-              </span>
-              <StatusPill status={project.status} />
-            </button>
-          ))}
-        </section>
-      )}
-
-      <ProjectFormSheet
-        isOpen={isCreateOpen}
-        onDismiss={() => setIsCreateOpen(false)}
-        onSubmit={handleCreateProject}
-      />
-
-      <AppVersionStamp />
-    </main>
-  );
+import { ArrowLeft, Plus, Search } from "lucide-react";
+import { useState } from "react";
+import { Brand } from "../../components/Brand";
+import { BottomNavigation } from "../../components/BottomNavigation";
+import { ProjectRow } from "./ProjectRow";
+import type { Project } from "./projectTypes";
+export function ProjectListScreen({ projects, onBack, onNewJob, onOpenProject }: { projects: Project[]; onBack: () => void; onNewJob: () => void; onOpenProject: (id: string) => void }) {
+  const [query,setQuery] = useState(""), [filter,setFilter] = useState("all");
+  const filtered = projects.filter(p => (filter === "all" || p.status === filter) && [p.name,p.clientName,p.clientCompany,p.siteAddress,p.suburb,p.reference].some(v => v?.toLowerCase().includes(query.toLowerCase())));
+  const filters = [["all","All"],["inProgress","Active"],["draft","Draft"],["complete","Completed"]];
+  return <main className="pillar-page"><header className="projects-header"><div><button className="back-label" onClick={onBack}><ArrowLeft size={18}/><Brand compact/></button><h1>Projects</h1></div><button className="new-job-circle" aria-label="New job" onClick={onNewJob}><Plus/></button></header><label className="pillar-search"><Search size={19}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search jobs, clients, addresses…" aria-label="Search projects"/></label><nav className="project-filters" aria-label="Project status">{filters.map(([id,label]) => <button key={id} aria-pressed={filter === id} className={filter === id ? "is-active" : ""} onClick={() => setFilter(id)}>{label} <span>({projects.filter(p => id === "all" || p.status === id).length})</span></button>)}</nav><section className="job-list" aria-label="Projects">{filtered.map(p => <ProjectRow key={p.id} project={p} onOpen={() => onOpenProject(p.id)}/>)}{!filtered.length ? <div className="notebook-empty"><h2>{projects.length ? "No matching jobs" : "Your jobs belong here"}</h2><p>{projects.length ? "Try another search or status." : "Create a job to start your site notebook."}</p>{!projects.length ? <button className="primary-button" onClick={onNewJob}>New job</button> : null}</div> : null}</section><BottomNavigation active="projects" onNavigate={tab => tab === "home" ? onBack() : undefined}/></main>;
 }

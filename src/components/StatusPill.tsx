@@ -2,8 +2,8 @@ import type { ProjectStatus } from "../features/projects/projectTypes";
 
 const statusLabels: Record<ProjectStatus, string> = {
   draft: "Draft",
-  inProgress: "In progress",
-  complete: "Complete",
+  inProgress: "Active",
+  complete: "Completed",
 };
 
 type StatusPillProps = {

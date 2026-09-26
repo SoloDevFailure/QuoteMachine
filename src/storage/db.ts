@@ -3,14 +3,17 @@ import type { Annotation, ReferencePoint, StoredAnnotation } from "../features/a
 import type { Asset } from "../features/assets/assetTypes";
 import type { Drawing } from "../features/drawings/drawingTypes";
 import type { SiteNote, SiteNoteContent, SiteNoteSection } from "../features/siteNotes/siteNoteTypes";
+import type { ClientContact } from "../features/clients/clientTypes";
 
 const databaseName = "fortestack";
-const databaseVersion = 5;
+const databaseVersion = 7;
 
-export type StoreName = "projects" | "drawings" | "assets" | "annotations" | "referencePoints" | "siteNotes" | "siteNoteSections" | "siteNoteContents";
+export type StoreName = "thumbnails" | "projects" | "drawings" | "assets" | "annotations" | "referencePoints" | "siteNotes" | "siteNoteSections" | "siteNoteContents" | "clientContacts";
 export type StoreRecordMap = {
+  thumbnails: import("../features/assets/thumbnails").Thumbnail;
   projects: Project; drawings: Drawing; assets: Asset; annotations: StoredAnnotation;
   referencePoints: ReferencePoint; siteNotes: SiteNote; siteNoteSections: SiteNoteSection; siteNoteContents: SiteNoteContent;
+  clientContacts: ClientContact;
 };
 export type StoreMap = { [Name in StoreName]: IDBObjectStore };
 
@@ -54,6 +57,13 @@ const migrations: Record<number, Migration> = {
     contents.createIndex("sectionId", "sectionId");
     contents.createIndex("sectionId_order", ["sectionId", "order"]);
   },
+  7(database) {
+    database.createObjectStore("thumbnails", { keyPath: "id" });
+  },
+  6(database) {
+    const clients=database.createObjectStore("clientContacts",{keyPath:"id"});
+    clients.createIndex("name","name"); clients.createIndex("updatedAt","updatedAt");
+  },
 };
 
 let databasePromise: Promise<IDBDatabase> | undefined;
@@ -89,6 +99,7 @@ function openDatabase(): Promise<IDBDatabase> {
         name: databaseName,
         version: request.result.version,
       });
+      request.result.onversionchange = () => { request.result.close(); databasePromise = undefined; };
       resolve(request.result);
     };
 
@@ -100,7 +111,7 @@ function openDatabase(): Promise<IDBDatabase> {
     };
 
     request.onblocked = () => {
-      const error = new Error("IndexedDB upgrade is blocked by another open ForteStack tab.");
+      const error = new Error("IndexedDB upgrade is blocked by another open PILLAR BUILDWORKS tab.");
       console.error("[ForteStack] IndexedDB open failure", error.message);
       databasePromise = undefined;
       reject(error);
@@ -249,7 +260,7 @@ export const db = {
 
   async deleteDrawingGraph(drawing: Drawing): Promise<void> {
     await runMultiStoreTransaction(
-      ["projects", "drawings", "annotations", "referencePoints", "assets", "siteNoteContents"] as const,
+      ["projects", "drawings", "annotations", "referencePoints", "assets", "siteNoteContents", "thumbnails"] as const,
       "readwrite",
       async (stores) => {
         const annotations = await requestResult<StoredAnnotation[]>(stores.annotations.index("drawingId").getAll(drawing.id));
@@ -266,11 +277,13 @@ export const db = {
         const remainingDrawings = await requestResult<Drawing[]>(stores.drawings.index("projectId").getAll(drawing.projectId));
         const remainingAnnotations = await requestResult<StoredAnnotation[]>(stores.annotations.getAll());
         const siteNoteContents = await requestResult<SiteNoteContent[]>(stores.siteNoteContents.getAll());
+        const projects = await requestResult<Project[]>(stores.projects.getAll());
+        for (const item of siteNoteContents) if (item.type === "drawing" && item.drawingId === drawing.id) stores.siteNoteContents.delete(item.id);
         for (const assetId of candidateAssetIds) {
           const usedByDrawing = remainingDrawings.some((item) => item.id !== drawing.id && item.backgroundAssetId === assetId);
           const usedByAnnotation = remainingAnnotations.some((item) => item.type === "image" && item.assetId === assetId && item.drawingId !== drawing.id);
           const usedBySiteNote = siteNoteContents.some((item) => item.type === "photo" && item.assetId === assetId);
-          if (!usedByDrawing && !usedByAnnotation && !usedBySiteNote) stores.assets.delete(assetId);
+          if (!usedByDrawing && !usedByAnnotation && !usedBySiteNote && !projects.some(item => item.projectPhotoAssetId === assetId)) { stores.assets.delete(assetId); stores.thumbnails.delete(assetId); }
         }
 
         const project = await requestResult<Project | undefined>(stores.projects.get(drawing.projectId));
@@ -297,12 +310,14 @@ export const db = {
     await runTransaction("assets", "readwrite", (store) => store.delete(assetId));
   },
 
-  async getAssetReferences(assetId: string, projectId: string): Promise<{ drawingIds: string[]; annotationIds: string[]; siteNoteContentIds: string[] }> {
-    return runMultiStoreTransaction(["drawings", "annotations", "siteNoteContents"] as const, "readonly", async (stores) => {
+  async getAssetReferences(assetId: string, projectId: string): Promise<{ drawingIds: string[]; annotationIds: string[]; siteNoteContentIds: string[]; projectIds: string[] }> {
+    return runMultiStoreTransaction(["projects", "drawings", "annotations", "siteNoteContents"] as const, "readonly", async (stores) => {
       const drawings = await requestResult<Drawing[]>(stores.drawings.index("projectId").getAll(projectId));
       const annotations = await requestResult<StoredAnnotation[]>(stores.annotations.getAll());
       const contents = await requestResult<SiteNoteContent[]>(stores.siteNoteContents.getAll());
+      const projects = await requestResult<Project[]>(stores.projects.getAll());
       return {
+        projectIds: projects.filter(item => item.projectPhotoAssetId === assetId).map(item => item.id),
         drawingIds: drawings.filter((drawing) => drawing.backgroundAssetId === assetId).map((drawing) => drawing.id),
         annotationIds: annotations.filter((item) => item.type === "image" && item.assetId === assetId).map((item) => item.id),
         siteNoteContentIds: contents.filter((item) => item.type === "photo" && item.assetId === assetId).map((item) => item.id),
@@ -311,15 +326,16 @@ export const db = {
   },
 
   async deleteAssetIfUnreferenced(asset: Asset): Promise<boolean> {
-    return runMultiStoreTransaction(["assets", "drawings", "annotations", "siteNoteContents"] as const, "readwrite", async (stores) => {
+    return runMultiStoreTransaction(["projects", "assets", "drawings", "annotations", "siteNoteContents", "thumbnails"] as const, "readwrite", async (stores) => {
       const drawings = await requestResult<Drawing[]>(stores.drawings.index("projectId").getAll(asset.projectId));
       const annotations = await requestResult<StoredAnnotation[]>(stores.annotations.getAll());
       const contents = await requestResult<SiteNoteContent[]>(stores.siteNoteContents.getAll());
-      const isReferenced = drawings.some((drawing) => drawing.backgroundAssetId === asset.id)
+      const projects = await requestResult<Project[]>(stores.projects.getAll());
+      const isReferenced = projects.some(item => item.projectPhotoAssetId === asset.id) || drawings.some((drawing) => drawing.backgroundAssetId === asset.id)
         || annotations.some((item) => item.type === "image" && item.assetId === asset.id)
         || contents.some((item) => item.type === "photo" && item.assetId === asset.id);
       if (isReferenced) return false;
-      stores.assets.delete(asset.id);
+      stores.assets.delete(asset.id); stores.thumbnails.delete(asset.id);
       return true;
     });
   },
@@ -354,7 +370,7 @@ export const db = {
 
   async deleteAnnotationAndCleanup(annotationId: string): Promise<void> {
     await runMultiStoreTransaction(
-      ["annotations", "drawings", "projects", "assets", "siteNoteContents"] as const,
+      ["annotations", "drawings", "projects", "assets", "siteNoteContents", "thumbnails"] as const,
       "readwrite",
       async (stores) => {
         const annotation = await requestResult<StoredAnnotation | undefined>(stores.annotations.get(annotationId));
@@ -371,10 +387,11 @@ export const db = {
           const remaining = await requestResult<StoredAnnotation[]>(stores.annotations.getAll());
           const drawings = await requestResult<Drawing[]>(stores.drawings.getAll());
           const siteNoteContents = await requestResult<SiteNoteContent[]>(stores.siteNoteContents.getAll());
-          const stillReferenced = remaining.some((item) => item.id !== annotationId && item.type === "image" && item.assetId === annotation.assetId)
+          const projects = await requestResult<Project[]>(stores.projects.getAll());
+          const stillReferenced = projects.some(item => item.projectPhotoAssetId === annotation.assetId) || remaining.some((item) => item.id !== annotationId && item.type === "image" && item.assetId === annotation.assetId)
             || drawings.some((item) => item.backgroundAssetId === annotation.assetId)
             || siteNoteContents.some((item) => item.type === "photo" && item.assetId === annotation.assetId);
-          if (!stillReferenced) stores.assets.delete(annotation.assetId);
+          if (!stillReferenced) { stores.assets.delete(annotation.assetId); stores.thumbnails.delete(annotation.assetId); }
         }
       },
     );

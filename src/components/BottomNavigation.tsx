@@ -1,13 +1,5 @@
-import { BriefcaseBusiness, House, Settings, UserRound } from "lucide-react";
+import { FolderKanban, House } from "lucide-react";
 import type { RootTab } from "../app/routes";
-
-const items = [
-  { id: "home", label: "Home", icon: House },
-  { id: "business", label: "Business", icon: BriefcaseBusiness },
-  { id: "profile", label: "Profile", icon: UserRound },
-  { id: "settings", label: "Settings", icon: Settings },
-] as const;
-
 export function BottomNavigation({ active, onNavigate }: { active: RootTab; onNavigate: (tab: RootTab) => void }) {
-  return <nav className="bottom-navigation" aria-label="Primary navigation">{items.map(({ id, label, icon: Icon }) => <button key={id} className={active === id ? "is-active" : ""} type="button" aria-current={active === id ? "page" : undefined} onClick={() => onNavigate(id)}><Icon size={24}/><span>{label}</span></button>)}</nav>;
+  return <nav className="pillar-bottom-nav" aria-label="Primary navigation"><button type="button" aria-current={active === "home" ? "page" : undefined} onClick={() => onNavigate("home")}><House size={20}/><span>Home</span></button><button type="button" aria-current={active === "projects" ? "page" : undefined} onClick={() => onNavigate("projects")}><FolderKanban size={20}/><span>Projects</span></button><span className="nav-signature">P / B<br/><small>FIELD WORKSPACE</small></span></nav>;
 }

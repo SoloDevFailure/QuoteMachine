@@ -1,3 +1,4 @@
+import { visibleDrawingAnnotations } from "./visibleAnnotations";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getDrawingAnnotations } from "../../annotations/annotationStore";
 import type { Annotation, ImageAnnotation } from "../../annotations/annotationTypes";
@@ -41,7 +42,7 @@ export function DrawingPreview({ drawing: suppliedDrawing, drawingId, className 
   useEffect(() => {
     if (!drawing) return;
     let cancelled = false;
-    getDrawingAnnotations(drawing.id).then((items) => { if (!cancelled) setAnnotations(items); });
+    getDrawingAnnotations(drawing.id).then((items) => { if (!cancelled) setAnnotations(visibleDrawingAnnotations(drawing, items)); });
     return () => { cancelled = true; };
   }, [drawing]);
 
@@ -87,7 +88,7 @@ export function DrawingPreview({ drawing: suppliedDrawing, drawingId, className 
     const bounds = getDrawingBounds(drawing, annotations);
     const width = Math.max(1, bounds.maxX - bounds.minX);
     const height = Math.max(1, bounds.maxY - bounds.minY);
-    const padding = 18;
+    const padding = Math.min(18, size.width * 0.12);
     const scale = Math.min((size.width - padding * 2) / width, (size.height - padding * 2) / height);
     return {
       scale: Math.max(0.01, scale),
@@ -105,7 +106,7 @@ export function DrawingPreview({ drawing: suppliedDrawing, drawingId, className 
           <div className="drawing-preview__world" style={{ transform: `translate(${transform.translateX}px, ${transform.translateY}px) scale(${transform.scale})` }}>
             <BackgroundLayer drawing={drawing} asset={asset} assetUrl={assetUrl} />
           </div>
-          <AnnotationSvgLayer annotations={annotations} selection={{}} mmPerWorldUnit={drawing.scale?.mmPerWorldUnit ?? 1} transform={transform} viewport={size} imageUrls={imageUrls} onEditAnnotation={() => undefined} onSelectAnnotation={() => undefined} />
+          <AnnotationSvgLayer annotations={annotations} selection={{}} mmPerWorldUnit={drawing.scale?.mmPerWorldUnit ?? 1} transform={transform} viewport={size} annotationScaleMultiplier={Math.min(1, size.width / 600)} imageUrls={imageUrls} onEditAnnotation={() => undefined} onSelectAnnotation={() => undefined} />
         </>
       ) : <span className="drawing-preview__loading">Loading preview…</span>}
     </div>

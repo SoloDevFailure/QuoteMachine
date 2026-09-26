@@ -1,4 +1,4 @@
-export type SiteNoteStatus = "draft" | "active" | "complete";
+export type SiteNoteStatus = "draft" | "active" | "readyForQuote";
 
 export type SiteNote = {
   id: string;

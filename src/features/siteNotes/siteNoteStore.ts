@@ -37,6 +37,8 @@ export async function touchSiteNote(siteNoteId: string): Promise<void> {
   });
 }
 
+export async function finishSiteNote(note:SiteNote):Promise<SiteNote>{const updated={...note,status:"readyForQuote" as const,updatedAt:now()};await runMultiStoreTransaction(["projects","siteNotes"] as const,"readwrite",async stores=>{stores.siteNotes.put(updated);const project=await requestResult<Project|undefined>(stores.projects.get(note.projectId));if(project)stores.projects.put({...project,updatedAt:updated.updatedAt})});return updated}
+
 export async function createSiteNoteForProject(project: Project, title = "Site Notes"): Promise<SiteNoteDocument> {
   const timestamp = now();
   const note: SiteNote = { id: createId(), projectId: project.id, title, status: "active", createdAt: timestamp, updatedAt: timestamp };
@@ -49,7 +51,8 @@ export async function createSiteNoteForProject(project: Project, title = "Site N
 }
 
 async function touch(stores: { siteNotes: IDBObjectStore; projects: IDBObjectStore }, note: SiteNote, timestamp: string) {
-  stores.siteNotes.put({ ...note, updatedAt: timestamp });
+  const storedNote = await requestResult<SiteNote | undefined>(stores.siteNotes.get(note.id));
+  if (storedNote) stores.siteNotes.put({ ...storedNote, updatedAt: timestamp });
   const project = await requestResult<Project | undefined>(stores.projects.get(note.projectId));
   if (project) stores.projects.put({ ...project, updatedAt: timestamp });
 }
@@ -65,30 +68,32 @@ export async function addSection(note: SiteNote, sections: SiteNoteSection[]): P
 }
 
 export async function updateSection(note: SiteNote, section: SiteNoteSection, patch: Partial<Pick<SiteNoteSection, "title" | "collapsed">>): Promise<SiteNoteSection> {
-  const timestamp = now(), updated = { ...section, ...patch, updatedAt: timestamp };
-  await runMultiStoreTransaction(["projects", "siteNotes", "siteNoteSections"] as const, "readwrite", async (stores) => { stores.siteNoteSections.put(updated); await touch(stores, note, timestamp); });
+  const timestamp = now();
+  let updated = { ...section, ...patch, updatedAt: timestamp };
+  await runMultiStoreTransaction(["projects", "siteNotes", "siteNoteSections"] as const, "readwrite", async (stores) => { const stored = await requestResult<SiteNoteSection | undefined>(stores.siteNoteSections.get(section.id)); if (!stored) throw new Error("Section no longer exists."); updated = { ...stored, ...patch, updatedAt: timestamp }; stores.siteNoteSections.put(updated); await touch(stores, note, timestamp); });
   return updated;
 }
 
 export async function reorderSections(note: SiteNote, sections: SiteNoteSection[]): Promise<SiteNoteSection[]> {
   const timestamp = now(), ordered = sections.map((section, order) => ({ ...section, order, updatedAt: timestamp }));
-  await runMultiStoreTransaction(["projects", "siteNotes", "siteNoteSections"] as const, "readwrite", async (stores) => { ordered.forEach((section) => stores.siteNoteSections.put(section)); await touch(stores, note, timestamp); });
+  await runMultiStoreTransaction(["projects", "siteNotes", "siteNoteSections"] as const, "readwrite", async (stores) => { await putSectionOrder(stores.siteNoteSections, ordered); await touch(stores, note, timestamp); });
   return ordered;
 }
 
 export async function deleteSection(note: SiteNote, section: SiteNoteSection, remaining: SiteNoteSection[]): Promise<void> {
-  await runMultiStoreTransaction(["projects", "siteNotes", "siteNoteSections", "siteNoteContents", "assets", "drawings", "annotations"] as const, "readwrite", async (stores) => {
+  await runMultiStoreTransaction(["projects", "siteNotes", "siteNoteSections", "siteNoteContents", "assets", "drawings", "annotations", "thumbnails"] as const, "readwrite", async (stores) => {
     const timestamp = now(), contents = await requestResult<SiteNoteContent[]>(stores.siteNoteContents.index("sectionId").getAll(section.id));
     contents.forEach((item) => stores.siteNoteContents.delete(item.id)); stores.siteNoteSections.delete(section.id);
-    remaining.forEach((item, order) => stores.siteNoteSections.put({ ...item, order, updatedAt: timestamp }));
+    await putSectionOrder(stores.siteNoteSections, remaining.map((item, order) => ({ ...item, order, updatedAt: timestamp })));
     for (const item of contents.filter((value): value is PhotoContent => value.type === "photo")) await deleteAssetWhenUnused(stores, item.assetId);
     await touch(stores, note, timestamp);
   });
 }
 
 export async function saveText(note: SiteNote, content: TextContent, text: string): Promise<TextContent> {
-  const timestamp = now(), updated = { ...content, text, updatedAt: timestamp };
-  await runMultiStoreTransaction(["projects", "siteNotes", "siteNoteContents"] as const, "readwrite", async (stores) => { stores.siteNoteContents.put(updated); await touch(stores, note, timestamp); });
+  const timestamp = now();
+  let updated = { ...content, text, updatedAt: timestamp };
+  await runMultiStoreTransaction(["projects", "siteNotes", "siteNoteContents"] as const, "readwrite", async (stores) => { const stored = await requestResult<TextContent | undefined>(stores.siteNoteContents.get(content.id)); if (!stored) throw new Error("Note no longer exists."); updated = { ...stored, text, updatedAt: timestamp }; stores.siteNoteContents.put(updated); await touch(stores, note, timestamp); });
   return updated;
 }
 
@@ -103,7 +108,7 @@ export async function insertPhoto(note: SiteNote, sectionId: string, asset: Asse
   const timestamp = now();
   const item: PhotoContent = { id: createId(), sectionId, type: "photo", assetId: asset.id, order: index, createdAt: timestamp, updatedAt: timestamp };
   await runMultiStoreTransaction(["projects", "siteNotes", "siteNoteContents", "assets"] as const, "readwrite", async (stores) => {
-    stores.assets.put(asset); const ordered = insertAt(contents, item, index); ordered.forEach((value) => stores.siteNoteContents.put(value)); await touch(stores, note, timestamp);
+    stores.assets.put(asset); const ordered = insertAt(contents, item, index); await putContentOrder(stores.siteNoteContents, ordered); await touch(stores, note, timestamp);
   });
   return item;
 }
@@ -117,12 +122,12 @@ export async function insertDrawing(note: SiteNote, sectionId: string, drawingId
 
 async function persistInsertion(note: SiteNote, contents: SiteNoteContent[], item: SiteNoteContent, index: number) {
   const timestamp = item.updatedAt;
-  await runMultiStoreTransaction(["projects", "siteNotes", "siteNoteContents"] as const, "readwrite", async (stores) => { insertAt(contents, item, index).forEach((value) => stores.siteNoteContents.put(value)); await touch(stores, note, timestamp); });
+  await runMultiStoreTransaction(["projects", "siteNotes", "siteNoteContents"] as const, "readwrite", async (stores) => { await putContentOrder(stores.siteNoteContents, insertAt(contents, item, index)); await touch(stores, note, timestamp); });
 }
 
 export async function reorderContents(note: SiteNote, sectionId: string, contents: SiteNoteContent[]): Promise<SiteNoteContent[]> {
   const timestamp = now(), ordered = contents.map((item, order) => ({ ...item, sectionId, order, updatedAt: timestamp }));
-  await runMultiStoreTransaction(["projects", "siteNotes", "siteNoteContents"] as const, "readwrite", async (stores) => { ordered.forEach((item) => stores.siteNoteContents.put(item)); await touch(stores, note, timestamp); });
+  await runMultiStoreTransaction(["projects", "siteNotes", "siteNoteContents"] as const, "readwrite", async (stores) => { await putContentOrder(stores.siteNoteContents, ordered); await touch(stores, note, timestamp); });
   return ordered;
 }
 
@@ -132,14 +137,14 @@ export async function moveContentToSection(note: SiteNote, item: SiteNoteContent
   const moved = { ...item, sectionId: destinationSectionId, order: destination.length, updatedAt: timestamp } as SiteNoteContent;
   const nextDestination = [...destination, moved].map((value, order) => ({ ...value, order, updatedAt: timestamp }));
   await runMultiStoreTransaction(["projects", "siteNotes", "siteNoteContents"] as const, "readwrite", async (stores) => {
-    [...nextSource, ...nextDestination].forEach((value) => stores.siteNoteContents.put(value)); await touch(stores, note, timestamp);
+    await putContentOrder(stores.siteNoteContents, [...nextSource, ...nextDestination]); await touch(stores, note, timestamp);
   });
   return { source: nextSource, destination: nextDestination };
 }
 
 export async function deleteContent(note: SiteNote, item: SiteNoteContent, remaining: SiteNoteContent[]): Promise<void> {
-  await runMultiStoreTransaction(["projects", "siteNotes", "siteNoteContents", "assets", "drawings", "annotations"] as const, "readwrite", async (stores) => {
-    const timestamp = now(); stores.siteNoteContents.delete(item.id); remaining.forEach((value, order) => stores.siteNoteContents.put({ ...value, order, updatedAt: timestamp }));
+  await runMultiStoreTransaction(["projects", "siteNotes", "siteNoteContents", "assets", "drawings", "annotations", "thumbnails"] as const, "readwrite", async (stores) => {
+    const timestamp = now(); stores.siteNoteContents.delete(item.id); await putContentOrder(stores.siteNoteContents, remaining.map((value, order) => ({ ...value, order, updatedAt: timestamp })));
     if (item.type === "photo") await deleteAssetWhenUnused(stores, item.assetId); await touch(stores, note, timestamp);
   });
 }
@@ -152,5 +157,20 @@ async function deleteAssetWhenUnused(stores: Record<string, IDBObjectStore>, ass
   const notes = await requestResult<SiteNoteContent[]>(stores.siteNoteContents.getAll());
   const drawings = await requestResult<Array<{ backgroundAssetId?: string }>>(stores.drawings.getAll());
   const annotations = await requestResult<Array<{ type: string; assetId?: string }>>(stores.annotations.getAll());
-  if (!notes.some((item) => item.type === "photo" && item.assetId === assetId) && !drawings.some((item) => item.backgroundAssetId === assetId) && !annotations.some((item) => item.type === "image" && item.assetId === assetId)) stores.assets.delete(assetId);
+  const projects = await requestResult<Project[]>(stores.projects.getAll());
+  if (!projects.some(item => item.projectPhotoAssetId === assetId) && !notes.some((item) => item.type === "photo" && item.assetId === assetId) && !drawings.some((item) => item.backgroundAssetId === assetId) && !annotations.some((item) => item.type === "image" && item.assetId === assetId)) { stores.assets.delete(assetId); stores.thumbnails.delete(assetId); }
+}
+
+// Reordering must never write stale text/title snapshots over a just-flushed edit.
+async function putContentOrder(store: IDBObjectStore, ordered: SiteNoteContent[]) {
+  for (const item of ordered) {
+    const stored = await requestResult<SiteNoteContent | undefined>(store.get(item.id));
+    store.put({ ...(stored ?? item), sectionId: item.sectionId, order: item.order, updatedAt: now() });
+  }
+}
+async function putSectionOrder(store: IDBObjectStore, ordered: SiteNoteSection[]) {
+  for (const section of ordered) {
+    const stored = await requestResult<SiteNoteSection | undefined>(store.get(section.id));
+    if (stored) store.put({ ...stored, order: section.order, updatedAt: now() });
+  }
 }

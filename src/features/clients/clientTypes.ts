@@ -1,0 +1,1 @@
+export type ClientContact = { id:string; name:string; company?:string; phone?:string; alternatePhone?:string; email?:string; defaultAddress?:string; billingAddress?:string; notes?:string; createdAt:string; updatedAt:string };
