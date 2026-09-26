@@ -4,6 +4,7 @@ import { App } from "./app/App";
 import { disableDevelopmentCaches } from "./app/devCache";
 import "./styles/tokens.css";
 import "./styles/global.css";
+import "./styles/pillar.css";
 
 disableDevelopmentCaches();
 
