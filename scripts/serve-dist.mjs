@@ -10,6 +10,8 @@ const mimeTypes = new Map([
   [".css", "text/css; charset=utf-8"],
   [".js", "text/javascript; charset=utf-8"],
   [".svg", "image/svg+xml"],
+  [".webmanifest", "application/manifest+json"],
+  [".ttf", "font/ttf"],
   [".png", "image/png"],
   [".jpg", "image/jpeg"],
   [".jpeg", "image/jpeg"],
@@ -42,5 +44,5 @@ createServer(async (request, response) => {
     response.end(body);
   }
 }).listen(port, "127.0.0.1", () => {
-  console.log(`ForteStack preview running at http://127.0.0.1:${port}`);
+  console.log(`PILLAR BUILDWORKS preview running at http://127.0.0.1:${port}`);
 });

@@ -1,0 +1,10 @@
+import { readdir, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+const assets = (await readdir("dist/assets")).filter(name=>/\.(js|css)$/.test(name)).sort().map(name=>"./assets/"+name);
+const shell=["./","./manifest.webmanifest","./fortestack-icon.svg","./fonts/DejaVuSans.ttf",...assets];
+const hash=createHash("sha256");
+for(const file of ["dist/index.html","dist/manifest.webmanifest","dist/fortestack-icon.svg",...assets.map(path=>"dist/"+path.slice(2))])hash.update(await readFile(file));
+let worker=await readFile("public/sw.js","utf8");
+worker=worker.replace("__PILLAR_CACHE__",hash.digest("hex").slice(0,12)).replace(/\/\* __PILLAR_PRECACHE__ \*\/ \[[^;]*\]/,JSON.stringify(shell));
+await writeFile("dist/sw.js",worker);
+console.log(`Offline bundle prepared: ${shell.length} resources, including PDF generation.`);

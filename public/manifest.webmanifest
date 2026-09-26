@@ -1,14 +1,14 @@
 {
-  "name": "ForteStack",
-  "short_name": "ForteStack",
-  "description": "Mobile-first construction drawing and measurement workspace.",
+  "name": "PILLAR BUILDWORKS",
+  "short_name": "PILLAR BUILDWORKS",
+  "description": "Local-first site notebooks, drawings and work orders.",
   "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#f8f8f6",
-  "theme_color": "#07111f",
+  "background_color": "#101415",
+  "theme_color": "#101415",
   "icons": [
     {
       "src": "./fortestack-icon.svg",
